@@ -1,6 +1,17 @@
 FROM ubuntu:16.04
 MAINTAINER Puneet Sachdev (puneet.sachdev@gmail.com)
 
+ARG user=jenkins
+ARG group=jenkins
+ARG uid=1000
+ARG gid=1000
+ARG JENKINS_AGENT_HOME=/home/${user}
+
+ENV JENKINS_AGENT_HOME ${JENKINS_AGENT_HOME}
+
+RUN groupadd -g ${gid} ${group} \
+    && useradd -d "${JENKINS_AGENT_HOME}" -u "${uid}" -g "${gid}" -m -s /bin/bash "${user}"
+
 # Make sure the package repository is up to date.
 RUN apt-get update
 RUN apt-get -y upgrade
@@ -24,26 +35,34 @@ RUN \
 # Define JAVA_HOME variable 
 ENV JAVA_HOME /usr/lib/jvm/java-8-oracle
 
-# Add user jenkins to the image
-RUN adduser --quiet jenkins
-# Set password for the jenkins user (you may want to alter this).
-RUN echo "jenkins:jenkins" | chpasswd
-
+#Install Maven
 RUN mkdir /home/jenkins/.m2
-
 #ADD settings.xml /home/jenkins/.m2/
-
 RUN chown -R jenkins:jenkins /home/jenkins/.m2/ 
-
-RUN wget --no-verbose -O /tmp/apache-maven-3.2.2.tar.gz http://archive.apache.org/dist/maven/maven-3/3.2.2/binaries/apache-maven-3.2.2-bin.tar.gz
+RUN wget -O /tmp/apache-maven-3.2.2.tar.gz http://archive.apache.org/dist/maven/maven-3/3.2.2/binaries/apache-maven-3.2.2-bin.tar.gz
 # verify checksum RUN echo "87e5cc81bc4ab9b83986b3e77e6b3095 /tmp/apache-maven-3.2.2.tar.gz" | md5sum -c
-# install maven RUN tar xzf /tmp/apache-maven-3.2.2.tar.gz -C /opt/
+RUN tar xzf /tmp/apache-maven-3.2.2.tar.gz -C /opt/
 RUN ln -s /opt/apache-maven-3.2.2 /opt/maven
 RUN ln -s /opt/maven/bin/mvn /usr/local/bin
 RUN rm -f /tmp/apache-maven-3.2.2.tar.gz
-ENV MAVEN_HOME /opt/maven 
+ENV MAVEN_HOME /opt/mave
 
-# Standard SSH port
+# setup SSH server
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y openssh-server \
+    && apt-get clean
+RUN sed -i 's/#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+RUN sed -i 's/#RSAAuthentication.*/RSAAuthentication yes/' /etc/ssh/sshd_config
+RUN sed -i 's/#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+RUN sed -i 's/#SyslogFacility.*/SyslogFacility AUTH/' /etc/ssh/sshd_config
+RUN sed -i 's/#LogLevel.*/LogLevel INFO/' /etc/ssh/sshd_config
+RUN mkdir /var/run/sshd
+
+VOLUME "${JENKINS_AGENT_HOME}" "/tmp" "/run" "/var/run"
+WORKDIR "${JENKINS_AGENT_HOME}"
+
+COPY setup-sshd /usr/local/bin/setup-sshd
+
 EXPOSE 22
 
-CMD ["/usr/sbin/sshd", "-D"]
+ENTRYPOINT ["setup-sshd"]
